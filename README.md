@@ -43,6 +43,7 @@ asignado, este paso se omite automáticamente.
 
 ## Diagnóstico de fallos
 
-Si el workflow termina en rojo, revisa el log del paso de ejecución de pruebas en la pestaña
-**Actions** — el mensaje indica qué comportamiento esperado no se cumplió. El reporte completo
-de pruebas también queda disponible como artifact descargable de esa misma ejecución.
+Si el workflow termina en rojo, abre la ejecución en la pestaña **Actions** y revisa el
+**resumen** que aparece arriba de la página (la sección "Resultado de la verificación") — ahí
+se ve, prueba por prueba, cuál pasó y cuál no, con el detalle completo al hacer clic sobre
+cada una que falló. No es necesario descargar nada.
