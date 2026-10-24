@@ -107,6 +107,10 @@ jobs:
           path: student-repo/target/surefire-reports/
           if-no-files-found: ignore
 
+      - name: Resumen de resultados
+        if: always()
+        run: python3 grading-repo/scripts/summarize_results.py "${{ steps.lookup-extra.outputs.found }}"
+
       - name: Veredicto
         id: verdict
         run: |
