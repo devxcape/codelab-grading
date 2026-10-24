@@ -92,6 +92,7 @@ jobs:
           PACKAGE="${{ steps.detect-package.outputs.package }}"
           PACKAGE_PATH=$(echo "$PACKAGE" | tr '.' '/')
           CLASS_NAME=$(jq -r '.class_name' /tmp/extra-assignment.json)
+          echo "class_name=$CLASS_NAME" >> "$GITHUB_OUTPUT"
           DEST="student-repo/src/test/java/$PACKAGE_PATH/$CLASS_NAME.java"
           jq -r '.test_source_base64' /tmp/extra-assignment.json | base64 -d > "$DEST"
           sed -i "1s/^package .*/package $PACKAGE;/" "$DEST"
@@ -109,7 +110,7 @@ jobs:
 
       - name: Resumen de resultados
         if: always()
-        run: python3 grading-repo/scripts/summarize_results.py "${{ steps.lookup-extra.outputs.found }}"
+        run: python3 grading-repo/scripts/summarize_results.py "${{ steps.lookup-extra.outputs.found }}" "${{ steps.run-extra.outputs.class_name }}"
 
       - name: Veredicto
         id: verdict
