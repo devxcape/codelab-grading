@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Lee los reportes de Surefire y escribe un resumen legible en GITHUB_STEP_SUMMARY."""
+"""Lee los reportes de Surefire y escribe un resumen legible en GITHUB_STEP_SUMMARY.
+
+Todo el detalle (incluido el stack trace completo de cada falla) queda en el resumen del
+job, dentro de bloques colapsables <details> — así se ve directo en la página del run, sin
+tener que descargar el artifact de Surefire.
+"""
 
 import glob
 import os
@@ -27,28 +32,26 @@ for report_file in report_files:
         error = testcase.find("error")
         problem = failure if failure is not None else error
         if problem is not None:
-            message = (problem.get("message") or "").splitlines()[0]
-            line = f"- ❌ `{classname}.{name}`"
+            message = (problem.get("message") or "").splitlines()[0].strip()
+            trace = (problem.text or "").strip()
+            summary_line = f"❌ <code>{classname}.{name}</code>"
             if message:
-                line += f" — {message}"
-            details.append(line)
+                summary_line += f" — {message}"
+            block = f"<details>\n<summary>{summary_line}</summary>\n\n```\n{trace}\n```\n\n</details>"
+            details.append(block)
         else:
             passed += 1
-            details.append(f"- ✅ `{classname}.{name}`")
+            details.append(f"✅ `{classname}.{name}`")
 
 lines = [
     "## Resultado de la verificación",
-    "",
     f"**{passed}/{total} pruebas pasaron**",
-    "",
     "Reto adicional asignado: " + ("sí" if extra_found == "true" else "no"),
-    "",
 ]
 lines.extend(details)
-lines.append("")
 
 summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-output = "\n".join(lines) + "\n"
+output = "\n\n".join(lines) + "\n"
 if summary_path:
     with open(summary_path, "a", encoding="utf-8") as f:
         f.write(output)
