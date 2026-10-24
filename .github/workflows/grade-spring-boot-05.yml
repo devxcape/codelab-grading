@@ -68,7 +68,35 @@ jobs:
         id: run-tests
         working-directory: student-repo
         run: |
-          mvn -B -Dtest=ClienteVerificationTest test 2>&1 | tee /tmp/test-output.txt
+          mvn -B -Dtest=ClienteVerificationTest test 2>&1 | tee /tmp/test-output-base.txt
+        continue-on-error: true
+
+      - name: Buscar reto adicional asignado
+        id: lookup-extra
+        run: |
+          URL="https://devxcape.github.io/codelab-grading/assignments/${{ github.repository_owner }}.json"
+          HTTP_CODE=$(curl -s -o /tmp/extra-assignment.json -w "%{http_code}" "$URL" || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Reto adicional encontrado para ${{ github.repository_owner }}."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "Sin reto adicional asignado (HTTP $HTTP_CODE)."
+          fi
+
+      - name: Preparar y ejecutar el reto adicional
+        if: steps.lookup-extra.outputs.found == 'true'
+        id: run-extra
+        run: |
+          set -e
+          PACKAGE="${{ steps.detect-package.outputs.package }}"
+          PACKAGE_PATH=$(echo "$PACKAGE" | tr '.' '/')
+          CLASS_NAME=$(jq -r '.class_name' /tmp/extra-assignment.json)
+          DEST="student-repo/src/test/java/$PACKAGE_PATH/$CLASS_NAME.java"
+          jq -r '.test_source_base64' /tmp/extra-assignment.json | base64 -d > "$DEST"
+          sed -i "1s/^package .*/package $PACKAGE;/" "$DEST"
+          cd student-repo
+          mvn -B -Dtest="$CLASS_NAME" test 2>&1 | tee /tmp/test-output-extra.txt
         continue-on-error: true
 
       - name: Publicar reporte de pruebas
@@ -82,11 +110,20 @@ jobs:
       - name: Veredicto
         id: verdict
         run: |
-          if grep -q "BUILD SUCCESS" /tmp/test-output.txt; then
+          BASE_OK=false
+          grep -q "BUILD SUCCESS" /tmp/test-output-base.txt && BASE_OK=true
+
+          EXTRA_OK=true
+          if [ "${{ steps.lookup-extra.outputs.found }}" = "true" ]; then
+            EXTRA_OK=false
+            grep -q "BUILD SUCCESS" /tmp/test-output-extra.txt 2>/dev/null && EXTRA_OK=true
+          fi
+
+          if [ "$BASE_OK" = "true" ] && [ "$EXTRA_OK" = "true" ]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "✅ Todas las pruebas de verificación pasaron."
           else
             echo "passed=false" >> "$GITHUB_OUTPUT"
-            echo "❌ Alguna prueba de verificación falló — revisa el log del paso 'Ejecutar pruebas de verificación' arriba, o el reporte publicado como artifact."
+            echo "❌ Alguna prueba de verificación falló — revisa los logs de los pasos de ejecución arriba, o el reporte publicado como artifact."
             exit 1
           fi

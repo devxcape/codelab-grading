@@ -34,6 +34,13 @@ No es necesario declarar ninguna prueba en tu repositorio — la verificación s
 forma centralizada y no requiere ninguna configuración adicional de tu parte más allá del
 workflow mostrado arriba.
 
+## Retos adicionales por estudiante
+
+Además de la verificación base, el workflow busca si tienes un reto adicional asignado,
+identificándote por tu usuario de GitHub. Si existe, se ejecuta junto con la verificación
+base y debe pasar igual que esta para que el workflow termine en verde. Si no tienes ninguno
+asignado, este paso se omite automáticamente.
+
 ## Diagnóstico de fallos
 
 Si el workflow termina en rojo, revisa el log del paso de ejecución de pruebas en la pestaña
