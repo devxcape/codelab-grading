@@ -1,13 +1,17 @@
 # codelab-grading
 
-Workflow reutilizable de GitHub Actions para verificar entregas de codelabs.
+Workflow reutilizable de GitHub Actions para verificar entregas de retos de código.
 
 ## Uso
 
-Desde el repositorio de tu entrega, agrega un workflow que invoque este workflow reutilizable:
+Desde el repositorio de tu entrega, agrega `.github/workflows/entregar.yml`:
 
 ```yaml
-name: Verificar entrega
+name: Calificar mi entrega
+
+permissions:
+  id-token: write
+  contents: read
 
 on:
   push:
@@ -15,11 +19,14 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  verificar:
-    uses: devxcape/codelab-grading/.github/workflows/grade-spring-boot-05.yml@main
+  calificar:
+    uses: devxcape/codelab-grading/.github/workflows/grade.yml@v1
     with:
-      challenge_id: spring-boot-05
+      challenge_id: "<uuid del reto, te lo da el profesor>"
 ```
+
+El bloque `permissions` de arriba es obligatorio tal cual está — sin él, el workflow falla al
+arrancar. No necesitas entender qué hace, solo copiarlo.
 
 El resultado queda registrado en la pestaña **Actions** de tu propio repositorio.
 
@@ -34,16 +41,13 @@ No es necesario declarar ninguna prueba en tu repositorio — la verificación s
 forma centralizada y no requiere ninguna configuración adicional de tu parte más allá del
 workflow mostrado arriba.
 
-## Retos adicionales por estudiante
-
-Además de la verificación base, el workflow busca si tienes un reto adicional asignado,
-identificándote por tu usuario de GitHub. Si existe, se ejecuta junto con la verificación
-base y debe pasar igual que esta para que el workflow termine en verde. Si no tienes ninguno
-asignado, este paso se omite automáticamente.
-
 ## Diagnóstico de fallos
 
 Si el workflow termina en rojo, abre la ejecución en la pestaña **Actions** y revisa el
-**resumen** que aparece arriba de la página (la sección "Resultado de la verificación") — ahí
-se ve, prueba por prueba, cuál pasó y cuál no, con el detalle completo al hacer clic sobre
-cada una que falló. No es necesario descargar nada.
+**resumen** que aparece arriba de la página (sección "Resultado de la verificación") — ahí se
+ve, prueba por prueba, cuál pasó y cuál no, con el detalle completo al hacer clic sobre cada
+una que falló. No es necesario descargar nada.
+
+Si el workflow falla en el paso "Pedir token OIDC" o "Buscar la prueba asignada", confirma que
+ya entregaste tu repositorio desde la plataforma antes de hacer push — el workflow busca una
+entrega en curso, no la crea.

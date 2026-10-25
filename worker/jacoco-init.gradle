@@ -1,0 +1,20 @@
+// Aplicado con --init-script por run.py: el estudiante NO necesita declarar jacoco en su
+// propio build.gradle (ver lms-challenge/CLAUDE.md "Enunciados y tests generados por IA" —
+// el reto no le exige eso, así que no podemos asumirlo).
+allprojects {
+    apply plugin: 'jacoco'
+
+    jacoco {
+        toolVersion = "0.8.12"
+    }
+
+    tasks.withType(Test).configureEach {
+        finalizedBy tasks.matching { it.name == 'jacocoTestReport' }
+    }
+
+    tasks.matching { it.name == 'jacocoTestReport' }.configureEach {
+        reports {
+            xml.required = true
+        }
+    }
+}

@@ -1,0 +1,215 @@
+name: Calificar reto
+
+# Workflow reutilizable — vive SOLO en este repo (devxcape/codelab-grading), nunca en el repo
+# de un estudiante. 3 jobs a propósito, no 1: el estudiante nunca tiene, en ningún momento,
+# la capacidad de llamar al backend de la plataforma.
+#
+#   fetch-test (confiable)       -> pide un token OIDC, busca la prueba real, la deja como
+#                                    artifact ANTES de tocar código del estudiante.
+#   build-and-test (NO confiable) -> corre el código del estudiante. Permissions explícitos,
+#                                    SIN id-token: write -- ningún proceso que el estudiante
+#                                    lance ahí puede pedir un token válido.
+#   score-and-report (confiable) -> runner NUEVO que jamás ejecutó código del estudiante. Lee
+#                                    solo evidencia cruda (XML), califica, reporta.
+
+on:
+  workflow_call:
+    inputs:
+      challenge_id:
+        description: "UUID del reto a calificar en el LMS"
+        required: true
+        type: string
+    outputs:
+      passed:
+        description: "'true' si la calificación terminó en status COMPLETED"
+        value: ${{ jobs.score-and-report.outputs.passed }}
+
+env:
+  EDUXCAPE_API_BASE: https://api.eduxcape.app
+  EDUXCAPE_OIDC_AUDIENCE: api.eduxcape.app
+
+jobs:
+  fetch-test:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      submission_id: ${{ steps.lookup.outputs.submission_id }}
+    steps:
+      - name: Validar challenge_id
+        env:
+          CHALLENGE_ID: ${{ inputs.challenge_id }}
+        run: |
+          set -e
+          if ! [[ "$CHALLENGE_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "challenge_id con formato inválido" >&2
+            exit 1
+          fi
+
+      - name: Pedir token OIDC
+        id: oidc
+        run: |
+          set -e
+          TOKEN=$(curl -sf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${EDUXCAPE_OIDC_AUDIENCE}" | jq -r '.value')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "No se pudo obtener el token OIDC" >&2
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Buscar la prueba asignada
+        id: lookup
+        env:
+          CHALLENGE_ID: ${{ inputs.challenge_id }}
+          TOKEN: ${{ steps.oidc.outputs.token }}
+        run: |
+          set -e
+          HTTP_CODE=$(curl -s -o /tmp/lookup.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${EDUXCAPE_API_BASE}/api/challenges/github-actions/lookup?challengeId=${CHALLENGE_ID}")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "El backend respondió ${HTTP_CODE} al buscar la prueba asignada." >&2
+            cat /tmp/lookup.json >&2
+            exit 1
+          fi
+          SUBMISSION_ID=$(jq -r '.submissionId' /tmp/lookup.json)
+          if [ -z "$SUBMISSION_ID" ] || [ "$SUBMISSION_ID" = "null" ]; then
+            echo "Respuesta de lookup sin submissionId" >&2
+            exit 1
+          fi
+          echo "submission_id=${SUBMISSION_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Subir el contenido de la prueba como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetched-test
+          path: /tmp/lookup.json
+          retention-days: 1
+
+  build-and-test:
+    needs: fetch-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # NUNCA id-token: write acá -- este job corre código del estudiante.
+    steps:
+      - name: Checkout del repositorio que invoca este workflow
+        uses: actions/checkout@v4
+        with:
+          path: student-repo
+
+      - name: Checkout del worker (repo público, sin token)
+        uses: actions/checkout@v4
+        with:
+          repository: devxcape/codelab-grading
+          path: grading-repo
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Descargar el contenido de la prueba
+        uses: actions/download-artifact@v4
+        with:
+          name: fetched-test
+          path: /tmp
+
+      - name: Compilar y correr los tests (modo build — no califica, no llama a nada)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          REPO_DIR: ${{ github.workspace }}/repo-clone
+          GRADLE_INIT_SCRIPT_PATH: ${{ github.workspace }}/grading-repo/worker/jacoco-init.gradle
+          EVIDENCE_DIR: ${{ github.workspace }}/evidence
+          WORKER_MODE: build
+        run: |
+          set -e
+          VERIFICATION_TEST_SOURCE=$(jq -r '.testSource' /tmp/lookup.json)
+          export VERIFICATION_TEST_SOURCE
+          python3 grading-repo/worker/run.py
+
+      - name: Subir evidencia cruda (XML + log de build, nunca una nota)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-evidence
+          path: ${{ github.workspace }}/evidence
+          retention-days: 1
+
+  score-and-report:
+    # fetch-test también va acá (no solo build-and-test) -- un job solo puede leer
+    # needs.<job>.outputs de jobs que están en SU PROPIO `needs`, aunque la dependencia ya
+    # esté implícita transitivamente a través de build-and-test.
+    needs: [fetch-test, build-and-test]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      passed: ${{ steps.verdict.outputs.passed }}
+    steps:
+      - name: Checkout del worker (repo público, sin token)
+        uses: actions/checkout@v4
+        with:
+          repository: devxcape/codelab-grading
+          path: grading-repo
+
+      - name: Descargar la evidencia cruda del build
+        uses: actions/download-artifact@v4
+        with:
+          name: build-evidence
+          path: ${{ github.workspace }}/evidence
+
+      - name: Calcular la nota (modo score — nunca re-corre el build del estudiante)
+        env:
+          EVIDENCE_DIR: ${{ github.workspace }}/evidence
+        run: |
+          python3 grading-repo/worker/run.py | tee /tmp/worker-output.txt
+
+      - name: Resumen de resultados
+        if: always()
+        run: python3 grading-repo/scripts/summarize_result.py /tmp/worker-output.txt
+
+      - name: Pedir token OIDC
+        id: oidc
+        run: |
+          set -e
+          TOKEN=$(curl -sf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${EDUXCAPE_OIDC_AUDIENCE}" | jq -r '.value')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "No se pudo obtener el token OIDC" >&2
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Reportar el resultado al backend
+        env:
+          SUBMISSION_ID: ${{ needs.fetch-test.outputs.submission_id }}
+          TOKEN: ${{ steps.oidc.outputs.token }}
+        run: |
+          set -e
+          RESULT_LINE=$(grep '##CHALLENGE_RESULT##' /tmp/worker-output.txt | tail -n1)
+          RESULT_JSON="${RESULT_LINE#*##CHALLENGE_RESULT##}"
+          echo "$RESULT_JSON" > /tmp/result.json
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @/tmp/result.json \
+            "${EDUXCAPE_API_BASE}/api/challenges/github-actions/${SUBMISSION_ID}/result"
+
+      - name: Veredicto
+        id: verdict
+        run: |
+          STATUS=$(jq -r '.status' /tmp/result.json)
+          if [ "$STATUS" = "COMPLETED" ]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            echo "❌ La calificación terminó en ${STATUS} — revisa el resumen de arriba." >&2
+            exit 1
+          fi
