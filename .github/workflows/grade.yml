@@ -167,6 +167,7 @@ jobs:
       - name: Calcular la nota (modo score — nunca re-corre el build del estudiante)
         env:
           EVIDENCE_DIR: ${{ github.workspace }}/evidence
+          WORKER_MODE: score
         run: |
           python3 grading-repo/worker/run.py | tee /tmp/worker-output.txt
 
